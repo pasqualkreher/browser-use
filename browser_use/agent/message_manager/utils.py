@@ -28,27 +28,36 @@ def is_model_without_tool_support(model_name: str) -> bool:
 
 
 def extract_json_from_model_output(content: str) -> dict:
-	"""Extract JSON from model output, handling both plain JSON and code-block-wrapped JSON."""
-	try:
-		# If content is wrapped in code blocks, extract just the JSON part
-		if '```' in content:
-			# Find the JSON content between code blocks
-			content = content.split('```')[1]
-			# Remove language identifier if present (e.g., 'json\n')
-			if '\n' in content:
-				content = content.split('\n', 1)[1]
-		# Parse the cleaned content
-		result_dict = json.loads(content)
+    try:
+        # If content is wrapped in code blocks, extract just the JSON part
+        if '```' in content:
+            # Find the JSON content between code blocks
+            content = content.split('```')[1]
+            # Remove language identifier if present (e.g., 'json\n')
+            if '\n' in content:
+                content = content.split('\n', 1)[1]
+        
+        # Parse the cleaned content
+        result_dict = json.loads(content)
 
-		# some models occasionally respond with a list containing one dict: https://github.com/browser-use/browser-use/issues/1458
-		if isinstance(result_dict, list) and len(result_dict) == 1 and isinstance(result_dict[0], dict):
-			result_dict = result_dict[0]
+        # Normalize single-item list containing a dict
+        if isinstance(result_dict, list) and len(result_dict) == 1 and isinstance(result_dict[0], dict):
+            result_dict = result_dict[0]
 
-		assert isinstance(result_dict, dict), f'Expected JSON dictionary in response, got JSON {type(result_dict)} instead'
-		return result_dict
-	except json.JSONDecodeError as e:
-		logger.warning(f'Failed to parse model output: {content} {str(e)}')
-		raise ValueError('Could not parse response.')
+        # 🟢 Fix nested text object structure
+        if "action" in result_dict and isinstance(result_dict["action"], list):
+            for action_item in result_dict["action"]:
+                if "done" in action_item and isinstance(action_item["done"], dict):
+                    text_field = action_item["done"].get("text")
+                    if isinstance(text_field, dict) and "value" in text_field:
+                        action_item["done"]["text"] = text_field["value"]
+
+        assert isinstance(result_dict, dict), f'Expected JSON dictionary in response, got JSON {type(result_dict)} instead'
+        return result_dict
+
+    except json.JSONDecodeError as e:
+        logger.warning(f'Failed to parse model output: {content} {str(e)}')
+        raise ValueError('Could not parse response.')
 
 
 def convert_input_messages(input_messages: list[BaseMessage], model_name: str | None) -> list[BaseMessage]:
